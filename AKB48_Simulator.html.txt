@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AKB48 模拟器 - 终极运营版 v2.0</title>
+    <style>
+        :root {
+            --akb-pink: #e91e63;
+            --akb-light: #fce4ec;
+            --team-a: #ff0000;
+            --team-k: #00ff00;
+            --team-b: #0000ff;
+            --guts-color: #ff9800;
+            --janken-gold: #ffd700;
+        }
+
+        body { font-family: 'Segoe UI', "Microsoft YaHei", sans-serif; background: #fdf2f5; margin: 0; color: #2c3e50; display: flex; justify-content: center; }
+        .container { width: 100%; max-width: 1200px; background: white; min-height: 100vh; box-shadow: 0 0 20px rgba(0,0,0,0.05); display: flex; flex-direction: column; }
+        header { background: var(--akb-pink); color: white; padding: 15px; text-align: center; }
+
+        /* 属性与仪表盘 */
+        .status-container { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; padding: 15px; background: #fff; border-bottom: 2px solid var(--akb-pink); }
+        .status-card { background: var(--akb-light); padding: 10px; border-radius: 8px; border: 1px solid #f8bbd0; text-align: center; }
+        .status-label { font-size: 11px; color: #880e4f; font-weight: bold; }
+        .status-value { font-size: 18px; font-weight: bold; color: var(--akb-pink); display: block; }
+
+        /* 布局 */
+        .game-grid { display: grid; grid-template-columns: 280px 1fr 320px; gap: 15px; padding: 15px; flex-grow: 1; }
+        
+        /* 动态成员列表 */
+        .panel { background: #fcfcfc; border: 1px solid #eee; border-radius: 10px; padding: 12px; }
+        .member-item { background: white; padding: 8px; border-radius: 5px; margin-bottom: 8px; border-left: 5px solid #ccc; font-size: 13px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+
+        /* 日志 */
+        .log-container { background: #1a1a1a; border-radius: 10px; padding: 12px; color: #00ff41; height: 500px; overflow-y: auto; font-size: 13px; font-family: 'Consolas', monospace; display: flex; flex-direction: column-reverse; }
+        .log-entry { margin-bottom: 6px; border-bottom: 1px dotted #333; padding-bottom: 4px; }
+        .tag { padding: 1px 4px; border-radius: 3px; font-size: 10px; color: white; margin-right: 5px; }
+
+        /* 操作按钮 */
+        .btn { border: none; padding: 12px; border-radius: 6px; font-weight: bold; cursor: pointer; transition: 0.2s; width: 100%; margin-bottom: 8px; }
+        .btn-main { background: var(--akb-pink); color: white; font-size: 16px; }
+        .btn-janken { background: var(--janken-gold); color: #333; animation: pulse 1.5s infinite; }
+        .btn-action { background: #fff; color: var(--akb-pink); border: 1px solid var(--akb-pink); }
+        .btn-action:hover { background: var(--akb-light); }
+
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.7; } 100% { opacity: 1; } }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <h1 style="margin:0;">AKB48 模拟器 - 终极运营版</h1>
+        <div id="game-info">正在载入秋叶原剧场...</div>
+    </header>
+
+    <div class="status-container" id="status-board"></div>
+
+    <div class="game-grid">
+        <aside class="panel">
+            <h3 style="color: var(--akb-pink); margin-top: 0;">所属团队与关系</h3>
+            <div id="team-info" style="font-weight: bold; margin-bottom: 10px;"></div>
+            <div id="bond-list"></div>
+        </aside>
+
+        <main class="log-container" id="log-display"></main>
+
+        <aside class="panel">
+            <button class="btn btn-main" onclick="nextQuarter()">推进季度 (单曲发布)</button>
+            <button class="btn btn-janken" id="janken-btn" style="display:none;" onclick="startJanken()">✊ 参加猜拳大会!</button>
+            
+            <div style="margin-top:15px; border-top: 1px solid #ddd; padding-top: 10px;">
+                <p style="font-size: 12px; color: #666;">季间行动 (剩余: <span id="acts">3</span>)</p>
+                <button class="btn btn-action" onclick="playAction('work')">🎤 外务/握手会</button>
+                <button class="btn btn-action" onclick="playAction('lesson')">💃 疯狂练习</button>
+                <button class="btn btn-action" onclick="playAction('variety')">📺 录制 AKBINGO</button>
+                <button class="btn btn-action" onclick="playAction('bond')">☕ 队友私联/聚餐</button>
+            </div>
+            
+            <button class="btn" style="background:#eee; color:#666; font-size:11px;" onclick="requestGraduation()">🌸 申请毕业</button>
+        </aside>
+    </div>
+</div>
+
+<script>
+    // --- 数据初始化 ---
+    let state = {
+        player: {
+            name: "主控", gen: 15, team: "Team A", status: "正式成员",
+            stats: { visual: 60, perf: 50, variety: 40, popularity: 200, stamina: 100, mood: 100, guts: 60, love: 30 },
+            isGraduated: false, rank: "圈外"
+        },
+        bonds: [
+            { name: "高桥南", value: 50, type: "前辈" },
+            { name: "前田敦子", value: 40, type: "对手" },
+            { name: "横山由依", value: 60, type: "亲友" }
+        ],
+        time: { year: 1, quarter: 1 },
+        acts: 3,
+        jankenEvent: false
+    };
+
+    function init() {
+        addLog("【系统】欢迎来到 48 集团！你现在的身份是正式成员。", "#7f8c8d");
+        updateUI();
+    }
+
+    // --- 核心行动逻辑 ---
+    function playAction(type) {
+        if(state.acts <= 0 || state.player.isGraduated) return;
+        const p = state.player;
+        state.acts--;
+
+        switch(type) {
+            case 'work':
+                let pGain = Math.floor((Math.random()*50 + 10) * (p.stats.guts/50));
+                p.stats.popularity += pGain;
+                p.stats.stamina -= 20;
+                addLog(`在握手会表现出色，粉丝增加 ${pGain}。`);
+                break;
+            case 'lesson':
+                p.stats.perf += Math.floor(6 * (1 + p.stats.guts/100));
+                p.stats.stamina -= 25;
+                p.stats.guts += 5;
+                addLog(`练习室的汗水不会白流，表现力提升！`);
+                break;
+            case 'variety':
+                p.stats.variety += 8;
+                p.stats.stamina -= 15;
+                addLog(`在综艺里被奶油炮击中，综艺感提升。`);
+                break;
+            case 'bond':
+                state.bonds.forEach(b => b.value += 5);
+                p.stats.mood += 15;
+                addLog(`与队友们聚餐，团队羁绊加深。`);
+                break;
+        }
+        updateUI();
+    }
+
+    // --- 季度与选拔逻辑 ---
+    function nextQuarter() {
+        if(state.player.isGraduated) return;
+        const p = state.player;
+        const q = state.time.quarter;
+        
+        addLog(`--- 第 ${state.time.year} 年 Q${q} 选拔名单公布 ---`, "#e91e63");
+
+        // 选拔算法
+        let score = (p.stats.visual * 0.3) + (p.stats.love * 0.4) + (p.stats.perf * 0.3);
+        if (q === 3) score = p.stats.popularity / 10; // 总选单
+
+        if (score > 95) {
+            p.rank = "CENTER"; p.stats.popularity += 1500; p.stats.love += 15;
+            addLog("🌟【大新闻】你成为了本次单曲的绝对 Center！");
+        } else if (score > 60) {
+            p.rank = "选拔组"; p.stats.popularity += 500;
+            addLog("✅ 你顺利进入选拔名单，拍摄了封面。");
+        } else {
+            p.rank = "圈外"; p.stats.mood -= 20; p.stats.guts -= 5;
+            addLog("❌ 落选了...在剧场继续磨练吧。");
+            // 移籍/降格判定：如果运营爱太低且长期圈外
+            if(p.stats.love < 10 && Math.random() < 0.2) triggerShuffle();
+        }
+
+        // 时间更新
+        if(state.time.quarter < 4) state.time.quarter++;
+        else { state.time.quarter = 1; state.time.year++; }
+
+        // 随机触发猜拳大会
+        state.jankenEvent = (Math.random() < 0.15);
+        if(state.jankenEvent) addLog("🏆【紧急】武道馆猜拳大会即将召开！", "#ffd700");
+
+        state.acts = 3;
+        p.stats.stamina = Math.max(10, p.stats.stamina - 20);
+        updateUI();
+    }
+
+    // --- 猜拳大会 (运气系统) ---
+    function startJanken() {
+        addLog("✊ 猜拳大会开始！全日本都在关注...", "#ffd700");
+        let rounds = 4;
+        let win = true;
+        for(let i=0; i<rounds; i++) {
+            if(Math.random() < 0.5) { win = false; break; }
+        }
+
+        if(win) {
+            state.player.rank = "猜拳Center";
+            state.player.stats.popularity += 3000;
+            state.player.stats.love += 50;
+            addLog("🎊【奇迹】你竟然一路连胜赢得了冠军！Center 达成！", "#ffd700");
+        } else {
+            addLog("💀 猜拳第一轮就输了，这就是运气啊。");
+        }
+        state.jankenEvent = false;
+        updateUI();
+    }
+
+    // --- 移籍与降格逻辑 ---
+    function triggerShuffle() {
+        const p = state.player;
+        const rand = Math.random();
+        if(rand < 0.5) {
+            p.status = "研究生";
+            p.stats.guts -= 30;
+            addLog("⚠️【降格通知】由于表现不佳，你被降格为研究生。请重新开始。", "#c62828");
+        } else {
+            p.team = "JKT48 (雅加达)";
+            p.stats.love += 40;
+            addLog("✈️【海外移籍】你被派往 JKT48 支援。虽然辛苦，但运营非常关注你！", "#00bcd4");
+        }
+    }
+
+    // --- 界面更新 ---
+    function updateUI() {
+        const p = state.player;
+        document.getElementById('game-info').innerText = `第 ${state.time.year} 年 · Q${state.time.quarter} | 身份: ${p.status}`;
+        document.getElementById('acts').innerText = state.acts;
+        document.getElementById('janken-btn').style.display = state.jankenEvent ? 'block' : 'none';
+        document.getElementById('team-info').innerHTML = `<span style="color:var(--akb-pink)">${p.team}</span> / ${p.rank}`;
+
+        const board = document.getElementById('status-board');
+        board.innerHTML = `
+            ${renderStat("颜值", p.stats.visual)}
+            ${renderStat("表现", p.stats.perf)}
+            ${renderStat("人气", p.stats.popularity, 5000)}
+            ${renderStat("斗志", p.stats.guts, 100)}
+            ${renderStat("心情", p.stats.mood, 100)}
+            <div class="status-card"><span class="status-label">运营爱</span><span class="status-value">${p.stats.love}</span></div>
+        `;
+
+        const bondBoard = document.getElementById('bond-list');
+        bondBoard.innerHTML = state.bonds.map(b => `
+            <div class="member-item"><strong>${b.name}</strong> (${b.type})<br>牵绊: ${b.value}</div>
+        `).join('');
+
+        if(p.isGraduated) document.querySelectorAll('button').forEach(b => b.disabled = true);
+    }
+
+    function renderStat(l, v, m=100) {
+        return `<div class="status-card"><span class="status-label">${l}</span><span class="status-value">${Math.floor(v)}</span></div>`;
+    }
+
+    function addLog(msg, color="#00ff41") {
+        const log = document.getElementById('log-display');
+        const entry = document.createElement('div');
+        entry.className = 'log-entry';
+        entry.style.color = color;
+        entry.innerHTML = `> [${state.time.year}.${state.time.quarter}] ${msg}`;
+        log.prepend(entry);
+    }
+
+    function requestGraduation() {
+        if(confirm("你确定要发表卒业声明吗？这将结束你的偶像生涯。")) {
+            state.player.isGraduated = true;
+            addLog("🌸 【毕业】谢谢大家一直以来的支持！这是最后的一首歌曲——", "#fff");
+            updateUI();
+        }
+    }
+
+    init();
+</script>
+</body>
+</html>
